@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+
+{% block title %}系统概览 - 电商推荐系统{% endblock %}
+{% block page_title %}系统概览{% endblock %}
+
+{% block content %}
+<!-- 统计卡片行 -->
+<div class="row mb-4">
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card stat-card primary h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="stat-label">总用户数</div>
+                        <div class="stat-value">{{ "{:,}".format(stats.total_users) }}</div>
+                    </div>
+                    <div class="stat-icon">
+                        <i class="fas fa-users"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card stat-card success h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="stat-label">总商品数</div>
+                        <div class="stat-value">{{ "{:,}".format(stats.total_items) }}</div>
+                    </div>
+                    <div class="stat-icon">
+                        <i class="fas fa-box"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card stat-card info h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="stat-label">总事件数</div>
+                        <div class="stat-value">{{ "{:,}".format(stats.total_events) }}</div>
+                    </div>
+                    <div class="stat-icon">
+                        <i class="fas fa-mouse-pointer"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card stat-card {% if model_exists %}success{% else %}warning{% endif %} h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="stat-label">模型状态</div>
+                        <div class="stat-value">
+                            {% if model_exists %}
+                            <span class="text-success">已就绪</span>
+                            {% else %}
+                            <span class="text-warning">未训练</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="stat-icon">
+                        <i class="fas fa-brain"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- 事件分布图 -->
+    <div class="col-lg-6 mb-4">
+        <div class="content-card h-100">
+            <div class="card-header">
+                <i class="fas fa-chart-pie me-2"></i>事件类型分布
+            </div>
+            <div class="card-body">
+                <div id="eventChart" class="chart-container"></div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 快速操作 -->
+    <div class="col-lg-6 mb-4">
+        <div class="content-card h-100">
+            <div class="card-header">
+                <i class="fas fa-bolt me-2"></i>快速操作
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-6 mb-3">
+                        <a href="{{ url_for('recommend.index') }}" class="btn btn-primary btn-lg w-100 py-4">
+                            <i class="fas fa-magic fa-2x mb-2 d-block"></i>
+                            推荐查询
+                        </a>
+                    </div>
+                    <div class="col-6 mb-3">
+                        <a href="{{ url_for('recommend.random_recommend') }}" class="btn btn-success btn-lg w-100 py-4">
+                            <i class="fas fa-random fa-2x mb-2 d-block"></i>
+                            随机推荐
+                        </a>
+                    </div>
+                    <div class="col-6">
+                        <a href="{{ url_for('analysis.index') }}" class="btn btn-info btn-lg w-100 py-4">
+                            <i class="fas fa-chart-bar fa-2x mb-2 d-block"></i>
+                            数据分析
+                        </a>
+                    </div>
+                    <div class="col-6">
+                        <a href="{{ url_for('model.index') }}" class="btn btn-warning btn-lg w-100 py-4">
+                            <i class="fas fa-brain fa-2x mb-2 d-block"></i>
+                            模型管理
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 热门商品 -->
+<div class="row">
+    <div class="col-12">
+        <div class="content-card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-fire me-2"></i>热门商品 TOP 10</span>
+                <a href="{{ url_for('analysis.index') }}" class="btn btn-sm btn-primary">查看更多</a>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-custom table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>排名</th>
+                                <th>商品ID</th>
+                                <th>类目</th>
+                                <th>浏览次数</th>
+                                <th>访客数</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in hot_items %}
+                            <tr>
+                                <td>
+                                    <span class="badge {% if item.rank <= 3 %}bg-warning{% else %}bg-secondary{% endif %}">
+                                        {{ item.rank }}
+                                    </span>
+                                </td>
+                                <td><strong>{{ item.item_id }}</strong></td>
+                                <td>{{ item.category_id }}</td>
+                                <td>{{ "{:,}".format(item.view_count) }}</td>
+                                <td>{{ "{:,}".format(item.unique_visitors) }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // 事件分布饼图
+    const eventChart = echarts.init(document.getElementById('eventChart'));
+    const eventData = [
+        {% for e in event_dist %}
+        { value: {{ e.count }}, name: '{{ e.event_type_cn }}' },
+        {% endfor %}
+    ];
+    
+    eventChart.setOption({
+        tooltip: {
+            trigger: 'item',
+            formatter: '{b}: {c} ({d}%)'
+        },
+        legend: {
+            orient: 'vertical',
+            left: 'left'
+        },
+        series: [{
+            type: 'pie',
+            radius: ['40%', '70%'],
+            avoidLabelOverlap: false,
+            itemStyle: {
+                borderRadius: 10,
+                borderColor: '#fff',
+                borderWidth: 2
+            },
+            label: {
+                show: true,
+                formatter: '{b}\n{d}%'
+            },
+            emphasis: {
+                label: {
+                    show: true,
+                    fontSize: 16,
+                    fontWeight: 'bold'
+                }
+            },
+            data: eventData,
+            color: ['#4e73df', '#1cc88a', '#f6c23e']
+        }]
+    });
+    
+    // 响应式
+    window.addEventListener('resize', function() {
+        eventChart.resize();
+    });
+</script>
+{% endblock %}

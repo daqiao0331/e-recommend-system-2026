@@ -1,0 +1,313 @@
+{% extends "base.html" %}
+
+{% block title %}模型管理 - 电商推荐系统{% endblock %}
+{% block page_title %}模型管理{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- 左侧：模型状态和操作 -->
+    <div class="col-lg-8">
+        <!-- 模型状态卡片 -->
+        <div class="content-card mb-4">
+            <div class="card-header">
+                <i class="fas fa-brain me-2"></i>ALS 推荐模型
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h5>模型状态</h5>
+                        <table class="table table-borderless">
+                            <tr>
+                                <td class="text-muted">状态:</td>
+                                <td>
+                                    {% if model_info.exists %}
+                                    <span class="status-badge success">
+                                        <i class="fas fa-check-circle me-1"></i>已就绪
+                                    </span>
+                                    {% else %}
+                                    <span class="status-badge warning">
+                                        <i class="fas fa-exclamation-circle me-1"></i>未训练
+                                    </span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted">路径:</td>
+                                <td><code>{{ model_info.path }}</code></td>
+                            </tr>
+                            {% if model_info.exists %}
+                            <tr>
+                                <td class="text-muted">更新时间:</td>
+                                <td>{{ model_info.modification_time_str }}</td>
+                            </tr>
+                            {% endif %}
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <h5>训练数据统计</h5>
+                        <table class="table table-borderless">
+                            <tr>
+                                <td class="text-muted">训练用户数:</td>
+                                <td><strong>{{ "{:,}".format(data_stats.user_count) }}</strong></td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted">训练商品数:</td>
+                                <td><strong>{{ "{:,}".format(data_stats.item_count) }}</strong></td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted">评分数据量:</td>
+                                <td><strong>{{ "{:,}".format(data_stats.rating_count) }}</strong></td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+                
+                <hr>
+                
+                <!-- 操作按钮 -->
+                <div class="d-flex gap-2">
+                    <button class="btn btn-primary btn-lg" id="trainBtn" 
+                            {% if training_status.is_training %}disabled{% endif %}>
+                        <i class="fas fa-play me-2"></i>
+                        {% if training_status.is_training %}训练中...{% else %}开始训练{% endif %}
+                    </button>
+                    <button class="btn btn-outline-primary" id="reloadBtn"
+                            {% if not model_info.exists %}disabled{% endif %}>
+                        <i class="fas fa-sync me-2"></i>重新加载模型
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 训练状态 -->
+        <div class="content-card mb-4" id="trainingStatusCard">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-tasks me-2"></i>训练状态</span>
+                <span class="status-badge {% if training_status.status == 'success' %}success{% elif training_status.status == 'failed' %}danger{% elif training_status.status == 'training' %}info{% else %}secondary{% endif %}" id="statusBadge">
+                    {{ training_status.status }}
+                </span>
+            </div>
+            <div class="card-body">
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <small class="text-muted">开始时间</small>
+                        <div id="startTime">{{ training_status.start_time or '-' }}</div>
+                    </div>
+                    <div class="col-md-4">
+                        <small class="text-muted">结束时间</small>
+                        <div id="endTime">{{ training_status.end_time or '-' }}</div>
+                    </div>
+                    <div class="col-md-4">
+                        <small class="text-muted">状态信息</small>
+                        <div id="statusMessage">{{ training_status.message or '-' }}</div>
+                    </div>
+                </div>
+                
+                <!-- 训练日志 -->
+                <div class="mt-3">
+                    <h6>训练日志</h6>
+                    <div class="bg-dark text-light p-3 rounded" style="height: 300px; overflow-y: auto; font-family: monospace; font-size: 12px;" id="trainingLog">
+                        {% for line in training_status.log %}
+                        <div>{{ line }}</div>
+                        {% endfor %}
+                        {% if not training_status.log %}
+                        <div class="text-muted">暂无日志</div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 右侧：模型信息 -->
+    <div class="col-lg-4">
+        <!-- 模型参数 -->
+        <div class="content-card mb-4">
+            <div class="card-header">
+                <i class="fas fa-cog me-2"></i>模型参数
+            </div>
+            <div class="card-body">
+                <table class="table table-sm">
+                    <tr>
+                        <td class="text-muted">算法</td>
+                        <td><strong>ALS</strong></td>
+                    </tr>
+                    <tr>
+                        <td class="text-muted">隐因子数</td>
+                        <td>10</td>
+                    </tr>
+                    <tr>
+                        <td class="text-muted">最大迭代次数</td>
+                        <td>10</td>
+                    </tr>
+                    <tr>
+                        <td class="text-muted">正则化参数</td>
+                        <td>0.1</td>
+                    </tr>
+                    <tr>
+                        <td class="text-muted">隐式反馈</td>
+                        <td><i class="fas fa-check text-success"></i></td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+        
+        <!-- 评分权重 -->
+        <div class="content-card mb-4">
+            <div class="card-header">
+                <i class="fas fa-balance-scale me-2"></i>评分权重
+            </div>
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                    <span class="badge bg-info me-2" style="width: 80px;">浏览</span>
+                    <div class="progress flex-grow-1" style="height: 20px;">
+                        <div class="progress-bar bg-info" style="width: 20%;">1 分</div>
+                    </div>
+                </div>
+                <div class="d-flex align-items-center mb-2">
+                    <span class="badge bg-warning me-2" style="width: 80px;">加购</span>
+                    <div class="progress flex-grow-1" style="height: 20px;">
+                        <div class="progress-bar bg-warning" style="width: 60%;">3 分</div>
+                    </div>
+                </div>
+                <div class="d-flex align-items-center">
+                    <span class="badge bg-success me-2" style="width: 80px;">购买</span>
+                    <div class="progress flex-grow-1" style="height: 20px;">
+                        <div class="progress-bar bg-success" style="width: 100%;">5 分</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 快速测试 -->
+        <div class="content-card">
+            <div class="card-header">
+                <i class="fas fa-flask me-2"></i>快速测试
+            </div>
+            <div class="card-body">
+                <p class="text-muted small">训练完成后，可以快速测试推荐效果</p>
+                <a href="{{ url_for('recommend.random_recommend') }}" class="btn btn-success w-100"
+                   {% if not model_info.exists %}disabled{% endif %}>
+                    <i class="fas fa-random me-2"></i>随机用户推荐测试
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let isTraining = {{ 'true' if training_status.is_training else 'false' }};
+    let pollInterval = null;
+    
+    // 开始训练
+    document.getElementById('trainBtn').addEventListener('click', function() {
+        if (isTraining) return;
+        
+        if (!confirm('确定要开始训练模型吗？这可能需要几分钟时间。')) return;
+        
+        this.disabled = true;
+        this.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>启动中...';
+        
+        fetch('{{ url_for("model.train_model") }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        })
+        .then(res => res.json())
+        .then(result => {
+            if (result.success) {
+                isTraining = true;
+                this.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>训练中...';
+                startPolling();
+            } else {
+                alert(result.message);
+                this.disabled = false;
+                this.innerHTML = '<i class="fas fa-play me-2"></i>开始训练';
+            }
+        })
+        .catch(err => {
+            alert('请求失败: ' + err);
+            this.disabled = false;
+            this.innerHTML = '<i class="fas fa-play me-2"></i>开始训练';
+        });
+    });
+    
+    // 重新加载模型
+    document.getElementById('reloadBtn').addEventListener('click', function() {
+        this.disabled = true;
+        this.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>加载中...';
+        
+        fetch('{{ url_for("model.reload_model") }}', {
+            method: 'POST'
+        })
+        .then(res => res.json())
+        .then(result => {
+            alert(result.message);
+            this.disabled = false;
+            this.innerHTML = '<i class="fas fa-sync me-2"></i>重新加载模型';
+        })
+        .catch(err => {
+            alert('请求失败: ' + err);
+            this.disabled = false;
+            this.innerHTML = '<i class="fas fa-sync me-2"></i>重新加载模型';
+        });
+    });
+    
+    // 轮询训练状态
+    function startPolling() {
+        if (pollInterval) return;
+        
+        pollInterval = setInterval(function() {
+            fetch('{{ url_for("model.training_status") }}')
+            .then(res => res.json())
+            .then(result => {
+                const status = result.data;
+                updateStatus(status);
+                
+                if (!status.is_training) {
+                    stopPolling();
+                    document.getElementById('trainBtn').disabled = false;
+                    document.getElementById('trainBtn').innerHTML = '<i class="fas fa-play me-2"></i>开始训练';
+                    isTraining = false;
+                    
+                    if (status.status === 'success') {
+                        document.getElementById('reloadBtn').disabled = false;
+                    }
+                }
+            });
+        }, 2000);
+    }
+    
+    function stopPolling() {
+        if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+        }
+    }
+    
+    function updateStatus(status) {
+        document.getElementById('startTime').textContent = status.start_time || '-';
+        document.getElementById('endTime').textContent = status.end_time || '-';
+        document.getElementById('statusMessage').textContent = status.message || '-';
+        
+        const badge = document.getElementById('statusBadge');
+        badge.textContent = status.status;
+        badge.className = 'status-badge';
+        if (status.status === 'success') badge.classList.add('success');
+        else if (status.status === 'failed') badge.classList.add('danger');
+        else if (status.status === 'training') badge.classList.add('info');
+        else badge.classList.add('secondary');
+        
+        // 更新日志
+        const logDiv = document.getElementById('trainingLog');
+        logDiv.innerHTML = status.log.map(line => `<div>${line}</div>`).join('') || '<div class="text-muted">暂无日志</div>';
+        logDiv.scrollTop = logDiv.scrollHeight;
+    }
+    
+    // 页面加载时，如果正在训练则开始轮询
+    if (isTraining) {
+        startPolling();
+    }
+</script>
+{% endblock %}

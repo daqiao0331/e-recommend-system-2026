@@ -11,7 +11,8 @@ Spark数据预处理与特征工程
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col, count, countDistinct, sum, when, min, max, avg,
-    from_unixtime, to_date, hour, dayofweek, log1p, lit
+    from_unixtime, to_date, hour, dayofweek, log1p, lit,
+    row_number, dense_rank, lag, lead, datediff, expr
 )
 from pyspark.sql.window import Window
 import logging
@@ -48,33 +49,112 @@ def load_data(spark):
         events_df = spark.read.csv(events_path, header=True, inferSchema=True) \
             .toDF("event_time", "visitor_id", "event_type", "item_id", "transaction_id")
     
-    logger.info(f"原始数据总量: {events_df.count():,} 条")
-    return events_df
+    original_count = events_df.count()
+    logger.info(f"原始数据总量: {original_count:,} 条")
+    return events_df, original_count
 
 
-def clean_data(events_df):
+def clean_data(events_df, original_count):
     """
-    数据清洗
-    - 过滤空值和无效事件
-    - 添加时间特征
-    """
-    logger.info("正在清洗数据...")
+    深度数据清洗
     
-    # 过滤空值和无效事件类型
+    处理问题：
+    1. 空值和无效事件类型
+    2. 重复记录（同一时间戳的相同事件）
+    3. 异常用户（机器人/爬虫 - 交互次数异常多）
+    4. 异常商品（几乎没人看的商品）
+    5. 时间范围异常的数据
+    """
+    logger.info("="*50)
+    logger.info("开始深度数据清洗...")
+    logger.info("="*50)
+    
+    # ========== Step 1: 基础清洗 ==========
+    logger.info("\n[Step 1/5] 基础清洗：过滤空值和无效事件类型...")
+    # 只保留有效的事件类型（过滤掉异常的'event'类型）
     valid_events = ['view', 'addtocart', 'transaction']
     cleaned_df = events_df \
         .filter(col("visitor_id").isNotNull()) \
         .filter(col("item_id").isNotNull()) \
+        .filter(col("event_type").isNotNull()) \
+        .filter(col("event_time").isNotNull()) \
         .filter(col("event_type").isin(valid_events))
     
-    # 添加时间特征
+    step1_count = cleaned_df.count()
+    logger.info(f"  过滤空值后: {step1_count:,} 条 (移除 {original_count - step1_count:,})")
+    
+    # ========== Step 2: 去除重复记录 ==========
+    logger.info("\n[Step 2/5] 去重：移除同一时间戳的重复事件...")
+    # 同一用户、同一商品、同一时间、同一事件类型 -> 只保留一条
+    cleaned_df = cleaned_df.dropDuplicates(["visitor_id", "item_id", "event_time", "event_type"])
+    
+    step2_count = cleaned_df.count()
+    logger.info(f"  去重后: {step2_count:,} 条 (移除重复 {step1_count - step2_count:,})")
+    
+    # ========== Step 3: 过滤异常用户（机器人/爬虫）==========
+    logger.info("\n[Step 3/5] 过滤异常用户（疑似机器人）...")
+    
+    # 计算每个用户的交互次数
+    user_stats = cleaned_df.groupBy("visitor_id").agg(
+        count("*").alias("event_count"),
+        countDistinct("item_id").alias("unique_items")
+    )
+    
+    # 【调整】使用99.9分位数，更宽松的阈值（之前是99分位）
+    thresholds = user_stats.selectExpr(
+        "percentile_approx(event_count, 0.999) as event_threshold",
+        "percentile_approx(unique_items, 0.999) as item_threshold"
+    ).collect()[0]
+    
+    event_threshold = thresholds['event_threshold']
+    item_threshold = thresholds['item_threshold']
+    logger.info(f"  用户交互次数99.9分位阈值: {event_threshold}")
+    logger.info(f"  用户商品数99.9分位阈值: {item_threshold}")
+    
+    # 【调整】只过滤极端异常用户，保留更多数据
+    # 移除：最低交互次数限制（之前要求>=2）
+    normal_users = user_stats \
+        .filter(col("event_count") <= event_threshold) \
+        .select("visitor_id")
+    
+    cleaned_df = cleaned_df.join(normal_users, "visitor_id", "inner")
+    
+    step3_count = cleaned_df.count()
+    logger.info(f"  过滤异常用户后: {step3_count:,} 条 (移除 {step2_count - step3_count:,})")
+    
+    # ========== Step 4: 过滤冷门商品（更宽松）==========
+    logger.info("\n[Step 4/5] 过滤冷门商品...")
+    
+    # 【调整】保留所有商品，不再过滤冷门商品
+    # 之前：至少被2个用户交互过的商品
+    # 现在：保留所有商品（>=1即可）
+    item_stats = cleaned_df.groupBy("item_id").agg(
+        countDistinct("visitor_id").alias("unique_visitors")
+    )
+    valid_items = item_stats.filter(col("unique_visitors") >= 1).select("item_id")
+    
+    cleaned_df = cleaned_df.join(valid_items, "item_id", "inner")
+    
+    step4_count = cleaned_df.count()
+    logger.info(f"  过滤冷门商品后: {step4_count:,} 条 (移除 {step3_count - step4_count:,})")
+    
+    # ========== Step 5: 添加时间特征 ==========
+    logger.info("\n[Step 5/5] 添加时间特征...")
     cleaned_df = cleaned_df \
         .withColumn("event_datetime", from_unixtime(col("event_time") / 1000)) \
         .withColumn("event_date", to_date(col("event_datetime"))) \
         .withColumn("event_hour", hour(col("event_datetime"))) \
         .withColumn("day_of_week", dayofweek(col("event_datetime")))
     
-    logger.info(f"清洗后数据量: {cleaned_df.count():,} 条")
+    # ========== 清洗总结 ==========
+    final_count = cleaned_df.count()
+    logger.info("\n" + "="*50)
+    logger.info("数据清洗完成！")
+    logger.info(f"  原始数据: {original_count:,}")
+    logger.info(f"  清洗后:   {final_count:,}")
+    logger.info(f"  清洗比例: {(original_count - final_count) / original_count * 100:.2f}%")
+    logger.info("="*50)
+    
     return cleaned_df
 
 
@@ -93,8 +173,8 @@ def create_user_item_ratings(cleaned_df):
     # 为不同行为赋予优化后的权重
     scored_df = cleaned_df.withColumn("score",
         when(col("event_type") == "view", 1.0)
-        .when(col("event_type") == "addtocart", 3.0)  # 加购权重提高
-        .when(col("event_type") == "transaction", 5.0)  # 购买最高权重
+        .when(col("event_type") == "addtocart", 5.0)  # 加购权重提高
+        .when(col("event_type") == "transaction", 10.0)  # 购买最高权重
         .otherwise(0.0)
     )
     
@@ -107,6 +187,8 @@ def create_user_item_ratings(cleaned_df):
             max("event_type").alias("max_event"),
             # 标记是否有加购行为（用于评估）
             max(when(col("event_type") == "addtocart", 1).otherwise(0)).alias("has_addtocart"),
+            # 标记是否有购买行为
+            max(when(col("event_type") == "transaction", 1).otherwise(0)).alias("has_transaction"),
             min("event_date").alias("first_interaction"),
             max("event_date").alias("last_interaction")
         )
@@ -117,6 +199,76 @@ def create_user_item_ratings(cleaned_df):
     
     logger.info(f"用户-商品对数量: {user_item_ratings.count():,}")
     return user_item_ratings
+
+
+def create_view_to_cart_dataset(cleaned_df):
+    """
+    专门为"view→addtocart"预测任务创建数据集
+    
+    关键：确保时序正确性！
+    - 正样本：用户先浏览后加购的商品（view时间 < addtocart时间）
+    - 负样本：用户只浏览未加购的商品
+    
+    这是任务的核心：基于"浏览"预测"加购"
+    """
+    logger.info("="*50)
+    logger.info("创建 view→addtocart 预测数据集（时序验证）")
+    logger.info("="*50)
+    
+    # ========== Step 1: 获取所有浏览事件（带时间）==========
+    view_events = cleaned_df \
+        .filter(col("event_type") == "view") \
+        .select(
+            col("visitor_id"),
+            col("item_id"),
+            col("event_time").alias("view_time")
+        )
+    
+    # ========== Step 2: 获取所有加购事件（带时间）==========
+    cart_events = cleaned_df \
+        .filter(col("event_type") == "addtocart") \
+        .select(
+            col("visitor_id"),
+            col("item_id"),
+            col("event_time").alias("cart_time")
+        )
+    
+    # ========== Step 3: 时序验证 - 先浏览后加购 ==========
+    # 关联浏览和加购，检查时间顺序
+    view_then_cart = view_events \
+        .join(cart_events, ["visitor_id", "item_id"], "left")
+    
+    # 正样本：浏览时间 < 加购时间（时序正确）
+    # 负样本：没有加购 或 加购在浏览之前（无效）
+    view_cart_df = view_then_cart \
+        .withColumn("label",
+            when(
+                (col("cart_time").isNotNull()) & 
+                (col("cart_time") > col("view_time")),  # 关键：时序验证
+                1
+            ).otherwise(0)
+        ) \
+        .groupBy("visitor_id", "item_id") \
+        .agg(
+            max("label").alias("label"),  # 只要有一次正确的时序就是正样本
+            min("view_time").alias("first_view_time"),
+            max("view_time").alias("last_view_time"),
+            count("*").alias("view_count")
+        )
+    
+    # ========== 统计 ==========
+    total = view_cart_df.count()
+    positive = view_cart_df.filter(col("label") == 1).count()
+    negative = total - positive
+    
+    logger.info(f"\nview→addtocart 数据集（时序验证后）:")
+    logger.info(f"  总样本数:          {total:,}")
+    logger.info(f"  正样本(先看后加购): {positive:,} ({positive/total*100:.2f}%)")
+    logger.info(f"  负样本(只看不加购): {negative:,} ({negative/total*100:.2f}%)")
+    logger.info(f"  转化率:            {positive/total*100:.2f}%")
+    logger.info("="*50)
+    
+    return view_cart_df
 
 
 def create_user_features(cleaned_df):
@@ -201,9 +353,11 @@ def main():
     spark = create_spark_session()
     
     try:
-        # 加载和清洗
-        events_df = load_data(spark)
-        cleaned_df = clean_data(events_df)
+        # 加载数据
+        events_df, original_count = load_data(spark)
+        
+        # 深度清洗
+        cleaned_df = clean_data(events_df, original_count)
         cleaned_df.cache()
         
         # 构建特征矩阵
@@ -215,6 +369,10 @@ def main():
         
         item_features = create_item_features(cleaned_df)
         save_to_hive(item_features, "item_features")
+        
+        # 创建view→addtocart预测专用数据集（核心任务，含时序验证）
+        view_cart_df = create_view_to_cart_dataset(cleaned_df)
+        save_to_hive(view_cart_df, "view_to_cart_dataset")
         
         print_statistics(spark)
         

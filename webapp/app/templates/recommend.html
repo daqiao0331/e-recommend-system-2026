@@ -1,0 +1,293 @@
+{% extends "base.html" %}
+
+{% block title %}推荐查询 - 电商推荐系统{% endblock %}
+{% block page_title %}推荐查询{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- 左侧：查询和结果 -->
+    <div class="col-lg-8">
+        <!-- 查询表单 -->
+        <div class="content-card mb-4">
+            <div class="card-header">
+                <i class="fas fa-search me-2"></i>用户推荐查询
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('recommend.index') }}" id="recommendForm">
+                    <div class="row align-items-end">
+                        <div class="col-md-8 mb-3">
+                            <label class="form-label">用户ID</label>
+                            <input type="text" class="form-control form-control-lg" name="user_id" 
+                                   id="userId" placeholder="请输入用户ID" 
+                                   value="{{ user_id or '' }}" required>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <button type="submit" class="btn btn-primary btn-lg w-100">
+                                <i class="fas fa-magic me-2"></i>获取推荐
+                            </button>
+                        </div>
+                    </div>
+                </form>
+                
+                <!-- 快速选择 -->
+                <div class="mt-3">
+                    <small class="text-muted">快速选择活跃用户：</small>
+                    <div class="mt-2">
+                        {% for u in active_users[:5] %}
+                        <button type="button" class="btn btn-outline-primary btn-sm me-1 mb-1 quick-user" 
+                                data-user="{{ u.user_id }}">
+                            {{ u.user_id }}
+                        </button>
+                        {% endfor %}
+                        <a href="{{ url_for('recommend.random_recommend') }}" class="btn btn-outline-success btn-sm mb-1">
+                            <i class="fas fa-random me-1"></i>随机用户
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 错误提示 -->
+        {% if error %}
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="fas fa-exclamation-circle me-2"></i>{{ error }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endif %}
+        
+        <!-- 推荐结果 -->
+        {% if recommendations %}
+        <div class="content-card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-star me-2"></i>推荐结果</span>
+                <div>
+                    <span class="badge bg-info me-2">共 {{ recommendations.count }} 条</span>
+                    <button class="btn btn-sm btn-success" id="saveResultBtn">
+                        <i class="fas fa-save me-1"></i>保存结果
+                    </button>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                {% for item in recommendations.recommendations %}
+                <div class="recommend-item">
+                    <div class="recommend-rank {% if item.rank <= 3 %}top3{% endif %}">
+                        {{ item.rank }}
+                    </div>
+                    <div class="flex-grow-1">
+                        <div class="fw-bold">商品 {{ item.item_id }}</div>
+                        <small class="text-muted">类目: {{ item.category_id }}</small>
+                    </div>
+                    <div class="text-end">
+                        <div class="fw-bold text-primary">{{ "%.4f"|format(item.score) }}</div>
+                        <small class="text-muted">推荐分数</small>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        
+        <!-- 分数可视化 -->
+        <div class="content-card mt-4">
+            <div class="card-header">
+                <i class="fas fa-chart-bar me-2"></i>推荐分数分布
+            </div>
+            <div class="card-body">
+                <div id="scoreChart" class="chart-container"></div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    
+    <!-- 右侧：用户画像 -->
+    <div class="col-lg-4">
+        {% if user_profile %}
+        <!-- 用户画像卡片 -->
+        <div class="content-card mb-4">
+            <div class="card-header">
+                <i class="fas fa-user me-2"></i>用户画像
+            </div>
+            <div class="card-body">
+                <div class="text-center mb-3">
+                    <div class="rounded-circle bg-primary text-white d-inline-flex align-items-center justify-content-center" 
+                         style="width: 80px; height: 80px; font-size: 2rem;">
+                        <i class="fas fa-user"></i>
+                    </div>
+                    <h5 class="mt-2 mb-0">{{ user_profile.user_id }}</h5>
+                    <small class="text-muted">用户ID</small>
+                </div>
+                
+                <hr>
+                
+                <div class="row">
+                    <div class="col-4">
+                        <div class="profile-stat">
+                            <div class="value text-primary">{{ user_profile.view_count }}</div>
+                            <div class="label">浏览</div>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="profile-stat">
+                            <div class="value text-warning">{{ user_profile.cart_count }}</div>
+                            <div class="label">加购</div>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="profile-stat">
+                            <div class="value text-success">{{ user_profile.purchase_count }}</div>
+                            <div class="label">购买</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <hr>
+                
+                <div class="mb-2">
+                    <small class="text-muted">加购率</small>
+                    <div class="progress" style="height: 8px;">
+                        <div class="progress-bar bg-warning" style="width: {{ user_profile.cart_rate }}%"></div>
+                    </div>
+                    <small>{{ user_profile.cart_rate }}%</small>
+                </div>
+                
+                <div>
+                    <small class="text-muted">购买率</small>
+                    <div class="progress" style="height: 8px;">
+                        <div class="progress-bar bg-success" style="width: {{ user_profile.purchase_rate }}%"></div>
+                    </div>
+                    <small>{{ user_profile.purchase_rate }}%</small>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 最近浏览 -->
+        {% if recent_items %}
+        <div class="content-card">
+            <div class="card-header">
+                <i class="fas fa-history me-2"></i>最近行为
+            </div>
+            <div class="card-body p-0">
+                <ul class="list-group list-group-flush">
+                    {% for item in recent_items %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>{{ item.item_id }}</strong>
+                            <br>
+                            <small class="text-muted">{{ item.category_id }}</small>
+                        </div>
+                        <span class="badge {% if item.event_type == 'transaction' %}bg-success{% elif item.event_type == 'addtocart' %}bg-warning{% else %}bg-info{% endif %}">
+                            {{ item.event_type_cn }}
+                        </span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+        {% endif %}
+        
+        {% else %}
+        <!-- 空状态 -->
+        <div class="content-card">
+            <div class="card-body text-center py-5">
+                <i class="fas fa-search fa-4x text-muted mb-3"></i>
+                <h5 class="text-muted">输入用户ID开始查询</h5>
+                <p class="text-muted mb-0">系统将为用户生成个性化推荐</p>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- 隐藏的推荐数据（用于保存） -->
+{% if recommendations %}
+<script id="recommendationData" type="application/json">
+{{ recommendations | tojson }}
+</script>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // 快速选择用户
+    document.querySelectorAll('.quick-user').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.getElementById('userId').value = this.dataset.user;
+            document.getElementById('recommendForm').submit();
+        });
+    });
+    
+    // 保存结果
+    {% if recommendations %}
+    document.getElementById('saveResultBtn').addEventListener('click', function() {
+        const data = JSON.parse(document.getElementById('recommendationData').textContent);
+        
+        fetch('{{ url_for("recommend.save_result") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        })
+        .then(res => res.json())
+        .then(result => {
+            if (result.success) {
+                alert('保存成功！\n文件路径: ' + result.filepath);
+            } else {
+                alert('保存失败: ' + result.message);
+            }
+        })
+        .catch(err => {
+            alert('请求失败: ' + err);
+        });
+    });
+    
+    // 推荐分数图表
+    const scoreChart = echarts.init(document.getElementById('scoreChart'));
+    const scoreData = {{ recommendations.recommendations | tojson }};
+    
+    scoreChart.setOption({
+        tooltip: {
+            trigger: 'axis',
+            formatter: function(params) {
+                const d = params[0];
+                return `商品 ${d.name}<br/>推荐分数: ${d.value.toFixed(4)}`;
+            }
+        },
+        xAxis: {
+            type: 'category',
+            data: scoreData.map(d => d.item_id),
+            axisLabel: {
+                rotate: 45,
+                fontSize: 10
+            }
+        },
+        yAxis: {
+            type: 'value',
+            name: '推荐分数'
+        },
+        series: [{
+            type: 'bar',
+            data: scoreData.map(d => d.score),
+            itemStyle: {
+                color: function(params) {
+                    const colors = ['#f6c23e', '#f6c23e', '#f6c23e', '#4e73df', '#4e73df', 
+                                   '#4e73df', '#4e73df', '#4e73df', '#4e73df', '#4e73df'];
+                    return colors[params.dataIndex] || '#4e73df';
+                }
+            },
+            label: {
+                show: true,
+                position: 'top',
+                formatter: function(params) {
+                    return params.value.toFixed(3);
+                },
+                fontSize: 10
+            }
+        }]
+    });
+    
+    window.addEventListener('resize', function() {
+        scoreChart.resize();
+    });
+    {% endif %}
+</script>
+{% endblock %}

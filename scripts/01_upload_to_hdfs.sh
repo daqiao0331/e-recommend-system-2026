@@ -32,29 +32,42 @@ hdfs dfs -mkdir -p $HDFS_OUTPUT
 echo "[✓] HDFS目录创建完成"
 
 echo ""
-echo "Step 2: 上传原始数据文件..."
+echo "Step 2: 上传原始数据文件（跳过已存在）..."
 echo "-------------------------------------------"
 
 # 上传用户行为数据
 if [ -f "$DATA_DIR/events.csv" ]; then
-    hdfs dfs -put -f $DATA_DIR/events.csv $HDFS_RAW/events/
-    echo "[✓] events.csv 上传成功"
+    if hdfs dfs -test -e $HDFS_RAW/events/events.csv; then
+        echo "[✓] events.csv 已存在，跳过上传"
+    else
+        hdfs dfs -put $DATA_DIR/events.csv $HDFS_RAW/events/
+        echo "[✓] events.csv 上传成功"
+    fi
 else
     echo "[!] events.csv 不存在，请先下载数据"
 fi
 
 # 上传商品属性数据（如果文件较大，可能分成多个part）
 if ls $DATA_DIR/item_properties*.csv 1> /dev/null 2>&1; then
-    hdfs dfs -put -f $DATA_DIR/item_properties*.csv $HDFS_RAW/item_properties/
-    echo "[✓] item_properties 上传成功"
+    # 检查是否已有文件
+    if hdfs dfs -test -d $HDFS_RAW/item_properties && hdfs dfs -ls $HDFS_RAW/item_properties/*.csv 1> /dev/null 2>&1; then
+        echo "[✓] item_properties 已存在，跳过上传"
+    else
+        hdfs dfs -put $DATA_DIR/item_properties*.csv $HDFS_RAW/item_properties/
+        echo "[✓] item_properties 上传成功"
+    fi
 else
     echo "[!] item_properties 文件不存在"
 fi
 
 # 上传类目树数据
 if [ -f "$DATA_DIR/category_tree.csv" ]; then
-    hdfs dfs -put -f $DATA_DIR/category_tree.csv $HDFS_RAW/category_tree/
-    echo "[✓] category_tree.csv 上传成功"
+    if hdfs dfs -test -e $HDFS_RAW/category_tree/category_tree.csv; then
+        echo "[✓] category_tree.csv 已存在，跳过上传"
+    else
+        hdfs dfs -put $DATA_DIR/category_tree.csv $HDFS_RAW/category_tree/
+        echo "[✓] category_tree.csv 上传成功"
+    fi
 else
     echo "[!] category_tree.csv 不存在"
 fi

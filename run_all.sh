@@ -22,13 +22,17 @@ fi
 export HIVE_HOME="${HIVE_HOME:-/home/daqiao/apache-hive-3.1.3-bin}"
 export PATH="$PATH:$HIVE_HOME/bin"
 
+# 配置 PySpark 使用系统 Python（确保所有节点路径一致）
+export PYSPARK_PYTHON=/usr/bin/python3
+export PYSPARK_DRIVER_PYTHON=/usr/bin/python3
+
 # 配置 HDFS 基础路径 (使用当前用户，避免权限问题)
 export HDFS_BASE="/user/$(whoami)/ecommerce"
 echo "使用 HDFS 路径: $HDFS_BASE"
 
 # 步骤1: 环境检查
 echo ""
-echo "[Step 1/6] 检查环境..."
+echo "[Step 1/7] 检查环境..."
 ./scripts/00_check_environment.sh
 read -p "环境检查通过？(y/n): " env_ok
 if [ "$env_ok" != "y" ]; then
@@ -38,23 +42,24 @@ fi
 
 # 步骤2: 上传数据
 echo ""
-echo "[Step 2/6] 上传数据到HDFS..."
+echo "[Step 2/7] 上传数据到HDFS..."
 ./scripts/01_upload_to_hdfs.sh
 
 # 步骤3: 创建Hive表
 echo ""
-echo "[Step 3/6] 创建Hive表..."
-hive --hivevar HDFS_BASE="${HDFS_BASE}" -f sql/01_create_tables.sql
+echo "[Step 3/7] 创建Hive表..."
+hive --hivevar HDFS_BASE="${HDFS_BASE}" -f sql/01_create_tables.sql 2>&1 | grep -v "WARN" || true
+echo "Hive表创建/更新完成"
 
 # 步骤4: Hive数据分析 (可选，跳过以加快速度)
 echo ""
-echo "[Step 4/6] 跳过 Hive 数据分析（将由 Spark 处理）..."
+echo "[Step 4/7] 跳过 Hive 数据分析（将由 Spark 处理）..."
 # hive --hivevar HDFS_BASE="${HDFS_BASE}" -f sql/02_data_analysis.sql
 echo "[提示] 如需运行 Hive 分析，请手动执行: hive -f sql/02_data_analysis.sql"
 
 # 步骤5: Spark数据预处理
 echo ""
-echo "[Step 5/6] 运行Spark数据预处理..."
+echo "[Step 5/7] 运行Spark数据预处理..."
 spark-submit \
     --master yarn \
     --deploy-mode client \
@@ -62,6 +67,8 @@ spark-submit \
     --executor-memory 4g \
     --num-executors 2 \
     --executor-cores 2 \
+    --conf "spark.driver.extraJavaOptions=-Xss4m" \
+    --conf "spark.executor.extraJavaOptions=-Xss4m" \
     spark/02_data_preprocessing.py
 
 # 步骤6: 训练ALS模型
@@ -74,6 +81,8 @@ spark-submit \
     --executor-memory 4g \
     --num-executors 2 \
     --executor-cores 2 \
+    --conf "spark.driver.extraJavaOptions=-Xss4m" \
+    --conf "spark.executor.extraJavaOptions=-Xss4m" \
     spark/03_train_als_model.py
 
 # 步骤7: 可视化
@@ -84,6 +93,8 @@ spark-submit \
     --deploy-mode client \
     --driver-memory 2g \
     --executor-memory 2g \
+    --conf "spark.driver.extraJavaOptions=-Xss4m" \
+    --conf "spark.executor.extraJavaOptions=-Xss4m" \
     spark/04_visualization.py
 
 echo ""

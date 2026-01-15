@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}关于 - 电商推荐系统{% endblock %}
+{% block page_title %}关于系统{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="content-card">
+            <div class="card-header">
+                <i class="fas fa-info-circle me-2"></i>系统介绍
+            </div>
+            <div class="card-body">
+                <h4>电子商务推荐系统</h4>
+                <p class="text-muted">基于 Hadoop + Spark 的电子商务推荐系统</p>
+                
+                <hr>
+                
+                <h5>技术架构</h5>
+                <ul>
+                    <li><strong>大数据平台</strong>: Hadoop 3.x + YARN</li>
+                    <li><strong>计算引擎</strong>: Apache Spark 3.x</li>
+                    <li><strong>数据仓库</strong>: Apache Hive</li>
+                    <li><strong>推荐算法</strong>: ALS (交替最小二乘法) 协同过滤</li>
+                    <li><strong>Web 框架</strong>: Flask</li>
+                    <li><strong>前端框架</strong>: Bootstrap 5 + ECharts</li>
+                </ul>
+                
+                <hr>
+                
+                <h5>数据集</h5>
+                <p>使用 Retailrocket 电子商务数据集：</p>
+                <ul>
+                    <li><strong>events.csv</strong>: 用户行为数据（浏览、加购、购买）</li>
+                    <li><strong>item_properties.csv</strong>: 商品属性信息</li>
+                    <li><strong>category_tree.csv</strong>: 商品类目层级</li>
+                </ul>
+                
+                <hr>
+                
+                <h5>功能模块</h5>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card border-primary mb-3">
+                            <div class="card-body">
+                                <h6 class="card-title"><i class="fas fa-magic text-primary me-2"></i>推荐查询</h6>
+                                <p class="card-text small">输入用户ID获取个性化商品推荐</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card border-success mb-3">
+                            <div class="card-body">
+                                <h6 class="card-title"><i class="fas fa-chart-bar text-success me-2"></i>数据分析</h6>
+                                <p class="card-text small">可视化数据统计和转化分析</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card border-warning mb-3">
+                            <div class="card-body">
+                                <h6 class="card-title"><i class="fas fa-brain text-warning me-2"></i>模型管理</h6>
+                                <p class="card-text small">训练和管理推荐模型</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card border-info mb-3">
+                            <div class="card-body">
+                                <h6 class="card-title"><i class="fas fa-save text-info me-2"></i>结果保存</h6>
+                                <p class="card-text small">保存推荐结果到本地文件</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <hr>
+                
+                <h5>版本信息</h5>
+                <table class="table table-sm">
+                    <tr><td>版本</td><td>v1.0.0</td></tr>
+                    <tr><td>更新日期</td><td>2026-01-14</td></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

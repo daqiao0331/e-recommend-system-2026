@@ -5,7 +5,17 @@ Spark ALS推荐模型训练
 电子商务推荐系统
 ============================================
 任务目标: 基于用户浏览行为预测加购行为
-执行方式: spark-submit --master yarn 03_train_als_model.py
+执行方式: 
+    export PYSPARK_PYTHON=/usr/bin/python3
+    export PYSPARK_DRIVER_PYTHON=/usr/bin/python3
+    spark-submit --master yarn --deploy-mode client \
+        --driver-memory 4g --executor-memory 4g \
+        --num-executors 2 --executor-cores 2 \
+        --conf "spark.driver.extraJavaOptions=-Xss4m" \
+        --conf "spark.executor.extraJavaOptions=-Xss4m" \
+        spark/03_train_als_model.py
+    
+    或直接运行: ./run_all.sh
 """
 
 from pyspark.sql import SparkSession
@@ -15,6 +25,7 @@ from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.ml.feature import StringIndexer
 import logging
 import time
+from datetime import datetime
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -155,6 +166,8 @@ def evaluate_ranking_metrics(spark, model, test_data, k=10):
     - Recall@K: 实际交互中被推荐到Top-K的比例  
     - Hit Rate: 至少命中一个的用户比例
     - NDCG@K: 归一化折损累计增益（考虑排序位置）
+    
+    重点评估: 推荐商品是否包含用户实际加购的商品
     """
     logger.info(f"计算排序指标 (K={k})...")
     
@@ -162,9 +175,10 @@ def evaluate_ranking_metrics(spark, model, test_data, k=10):
     from pyspark.sql.functions import udf
     from pyspark.sql.types import DoubleType, IntegerType, StructType, StructField
     
-    # 获取测试集中每个用户的实际交互商品（rating>=2表示多次浏览或加购）
+    # 核心：获取测试集中用户实际加购的商品（has_addtocart=1）
+    # 这是任务目标：预测哪些浏览的商品会被加购
     actual_items = test_data \
-        .filter(col("rating") >= 2) \
+        .filter(col("has_addtocart") == 1) \
         .groupBy("user_id") \
         .agg(collect_list("item_id").alias("actual_items"))
     
@@ -187,10 +201,10 @@ def evaluate_ranking_metrics(spark, model, test_data, k=10):
     
     eval_count = eval_df.count()
     if eval_count == 0:
-        logger.warning("没有可评估的用户")
+        logger.warning("没有可评估的用户（无加购行为）")
         return {'precision': 0, 'recall': 0, 'hit_rate': 0, 'ndcg': 0}
     
-    logger.info(f"可评估用户数: {eval_count:,}")
+    logger.info(f"可评估用户数（有加购行为）: {eval_count:,}")
     
     # 命中数UDF
     def calc_hits(rec_items, actual_items):
@@ -243,6 +257,57 @@ def evaluate_ranking_metrics(spark, model, test_data, k=10):
     }
 
 
+def evaluate_view_to_cart_prediction(spark, model, ratings_indexed, k=10):
+    """
+    专门评估"view→addtocart"预测任务
+    
+    核心指标：
+    - 对于只浏览未加购的用户-商品对，推荐结果是否能预测他们会加购
+    - 这是任务的核心目标
+    """
+    logger.info("评估 view→addtocart 预测性能...")
+    
+    from pyspark.sql.functions import row_number
+    from pyspark.sql.window import Window
+    
+    # 获取有加购行为的用户-商品对
+    actual_cart = ratings_indexed \
+        .filter(col("has_addtocart") == 1) \
+        .select("user_id", "item_id") \
+        .distinct()
+    
+    actual_cart_count = actual_cart.count()
+    logger.info(f"实际加购的用户-商品对: {actual_cart_count:,}")
+    
+    # 获取所有用户的Top-K推荐
+    all_users = ratings_indexed.select("user_id").distinct()
+    user_recs = model.recommendForUserSubset(all_users, k)
+    
+    # 展开推荐
+    user_recs_flat = user_recs \
+        .select(col("user_id"), explode(col("recommendations")).alias("rec")) \
+        .select(col("user_id"), col("rec.item_id").alias("item_id"))
+    
+    # 计算推荐与实际加购的交集
+    hits = user_recs_flat.join(actual_cart, ["user_id", "item_id"], "inner")
+    hit_count = hits.count()
+    
+    # 计算指标
+    total_recs = user_recs_flat.count()
+    precision = hit_count / total_recs if total_recs > 0 else 0
+    recall = hit_count / actual_cart_count if actual_cart_count > 0 else 0
+    
+    logger.info(f"  推荐命中加购: {hit_count:,} / {total_recs:,}")
+    logger.info(f"  View→Cart Precision@{k}: {precision:.4f}")
+    logger.info(f"  View→Cart Recall@{k}: {recall:.4f}")
+    
+    return {
+        'v2c_precision': precision,
+        'v2c_recall': recall,
+        'v2c_hits': hit_count
+    }
+
+
 def generate_recommendations(model, user_mapping, item_mapping, top_n=10):
     """生成推荐结果"""
     logger.info(f"生成Top-{top_n}推荐...")
@@ -274,8 +339,11 @@ def save_results(spark, model, recommendations, user_recs_flat, user_mapping, it
     """保存模型和结果"""
     logger.info("保存模型和结果...")
     
-    # 保存模型
-    model_path = "/user/ecommerce/model/als_model"
+    # 保存模型（使用环境变量配置路径）
+    import os
+    hdfs_base = os.environ.get("HDFS_BASE", f"/user/{os.environ.get('USER', 'daqiao')}/ecommerce")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    model_path = f"{hdfs_base}/model/als_model_{timestamp}"
     model.write().overwrite().save(model_path)
     logger.info(f"[✓] 模型: {model_path}")
     
@@ -339,6 +407,9 @@ def main():
         # 评估 - 排序指标 (核心)
         ranking_metrics = evaluate_ranking_metrics(spark, model, test, k=10)
         
+        # 评估 - view→addtocart 预测（任务核心目标）
+        v2c_metrics = evaluate_view_to_cart_prediction(spark, model, ratings_indexed, k=10)
+        
         # 打印评估结果
         print("\n" + "="*60)
         print("              模型评估结果")
@@ -351,6 +422,10 @@ def main():
         print(f"    Recall@10:     {ranking_metrics['recall']:.4f}  (召回率)")
         print(f"    Hit Rate:      {ranking_metrics['hit_rate']:.4f}  (用户命中比例)")
         print(f"    NDCG@10:       {ranking_metrics['ndcg']:.4f}  (排序质量)")
+        print("\n  【View→AddToCart 预测】 ★ 核心任务目标")
+        print(f"    V2C Precision@10:  {v2c_metrics['v2c_precision']:.4f}")
+        print(f"    V2C Recall@10:     {v2c_metrics['v2c_recall']:.4f}")
+        print(f"    命中加购数:        {v2c_metrics['v2c_hits']:,}")
         print("="*60 + "\n")
         
         # 生成推荐
@@ -364,9 +439,11 @@ def main():
         # 保存指标到Hive供可视化使用
         metrics_data = [(rmse, mae, ranking_metrics['precision'], 
                         ranking_metrics['recall'], ranking_metrics['hit_rate'], 
-                        ranking_metrics['ndcg'])]
+                        ranking_metrics['ndcg'],
+                        v2c_metrics['v2c_precision'], v2c_metrics['v2c_recall'])]
         metrics_df = spark.createDataFrame(metrics_data, 
-            ["rmse", "mae", "precision_at_10", "recall_at_10", "hit_rate", "ndcg_at_10"])
+            ["rmse", "mae", "precision_at_10", "recall_at_10", "hit_rate", "ndcg_at_10",
+             "v2c_precision_at_10", "v2c_recall_at_10"])
         metrics_df.write.mode("overwrite").saveAsTable("ecommerce.model_metrics")
         logger.info("[✓] 模型指标已保存到 ecommerce.model_metrics")
         
@@ -376,7 +453,9 @@ def main():
         print("\n" + "="*60)
         print("       ALS模型训练完成！")
         print("="*60)
-        print(f"\n核心指标: Precision@10={ranking_metrics['precision']:.4f}, Recall@10={ranking_metrics['recall']:.4f}")
+        print(f"\n核心指标:")
+        print(f"  Precision@10={ranking_metrics['precision']:.4f}, Recall@10={ranking_metrics['recall']:.4f}")
+        print(f"  View→Cart Precision@10={v2c_metrics['v2c_precision']:.4f}")
         print("\n下一步: spark-submit --master yarn spark/04_visualization.py\n")
         
     finally:

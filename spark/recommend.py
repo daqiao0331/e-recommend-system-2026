@@ -68,7 +68,8 @@ def main():
     # 2. 最近浏览
     print("\n【最近浏览】")
     recent = spark.sql(f"""
-        SELECT e.item_id, e.event_type, p.property_value as category_id
+        SELECT e.item_id, e.event_type, e.event_time,
+               p.property_value as category_id
         FROM ecommerce.user_events e
         LEFT JOIN ecommerce.item_properties p 
             ON e.item_id = p.item_id AND p.property_name = 'categoryid'
@@ -80,10 +81,13 @@ def main():
     # 事件类型中文
     event_map = {'view': '浏览', 'addtocart': '加购', 'transaction': '购买'}
     
+    from datetime import datetime
     for idx, r in enumerate(recent, 1):
         event_cn = event_map.get(r['event_type'], r['event_type'])
         category = f"类目{r['category_id']}" if r['category_id'] else '未分类'
-        print(f"  {idx}. 商品 {r['item_id']:<8}  [{event_cn}]  {category}")
+        # 转换时间戳为可读时间
+        time_str = datetime.fromtimestamp(r['event_time']/1000).strftime('%m-%d %H:%M:%S')
+        print(f"  {idx}. {time_str}  商品{r['item_id']:<8}  [{event_cn}]  {category}")
     
     # 3. 获取推荐
     print("\n【推荐结果】")
@@ -140,10 +144,52 @@ def main():
     print(f"\n  为用户推荐以下商品:\n")
     print(f"  {'排名':<6} {'商品ID':<12} {'商品类目':<20} {'推荐分数':<10}")
     print("  " + "-"*70)
+    
+    rec_categories = []
     for idx, r in enumerate(rec_list, 1):
         original_item = item_map.get(r['item_id'], r['item_id'])
         category = item_props.get(original_item, '未分类')
+        rec_categories.append(category)
         print(f"  {idx:<6} {str(original_item):<12} {category:<20} {r['rating']:8.4f}")
+    
+    # 推荐质量评估
+    print("\n【推荐质量评估】")
+    
+    # 1. 分数范围
+    scores = [r['rating'] for r in rec_list]
+    print(f"  分数范围: {min(scores):.4f} ~ {max(scores):.4f}  (差值: {max(scores)-min(scores):.4f})")
+    
+    # 2. 类目多样性
+    unique_cats = len(set(rec_categories))
+    print(f"  类目多样性: {unique_cats}/10 个不同类目", end="")
+    if unique_cats >= 8:
+        print("  ✓ 多样性好")
+    elif unique_cats >= 5:
+        print("  ⚠ 多样性中等")
+    else:
+        print("  ✗ 多样性差，推荐过于集中")
+    
+    # 3. 与历史的相关性
+    hist_categories = spark.sql(f"""
+        SELECT DISTINCT p.property_value as cat
+        FROM ecommerce.user_events e
+        JOIN ecommerce.item_properties p 
+            ON e.item_id = p.item_id AND p.property_name = 'categoryid'
+        WHERE e.visitor_id = '{visitor_id}'
+    """).collect()
+    
+    hist_cats = set(f"类目{r['cat']}" for r in hist_categories if r['cat'])
+    rec_cats_set = set(rec_categories) - {'未分类'}
+    overlap = len(hist_cats & rec_cats_set)
+    
+    if hist_cats:
+        print(f"  历史类目: {len(hist_cats)} 个  |  推荐命中: {overlap} 个", end="")
+        if overlap >= 3:
+            print("  ✓ 相关性强")
+        elif overlap >= 1:
+            print("  ⚠ 相关性中等")
+        else:
+            print("  ✗ 相关性弱，可能在探索新兴趣")
     
     print("\n" + "="*70 + "\n")
     

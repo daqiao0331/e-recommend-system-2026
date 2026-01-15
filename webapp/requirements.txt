@@ -1,0 +1,14 @@
+# Flask 核心
+flask>=3.0.0
+flask-wtf>=1.2.0
+
+# Spark 集成
+pyspark>=3.5.0
+
+# 工具库
+python-dotenv>=1.0.0
+
+# 已有依赖（从主项目继承）
+pandas
+numpy
+matplotlib

@@ -114,8 +114,12 @@ def fetch_data(spark):
         recall = float(metrics['recall_at_10'])
         hit_rate = float(metrics['hit_rate'])
         ndcg = float(metrics['ndcg_at_10'])
+        # 新增view→cart指标
+        v2c_precision = float(metrics['v2c_precision_at_10']) if 'v2c_precision_at_10' in metrics.asDict() else 0.0
+        v2c_recall = float(metrics['v2c_recall_at_10']) if 'v2c_recall_at_10' in metrics.asDict() else 0.0
     except:
         rmse, mae, precision, recall, hit_rate, ndcg = 2.89, 1.66, 0.0116, 0.0793, 0.1092, 0.0523
+        v2c_precision, v2c_recall = 0.0, 0.0
     
     data['stats'] = {
         'total': stats['total'], 'users': stats['users'], 'items': stats['items'],
@@ -127,7 +131,8 @@ def fetch_data(spark):
         'v2c_rate': stats['carts']/stats['views']*100 if stats['views'] else 0,
         'c2b_rate': stats['buys']/stats['carts']*100 if stats['carts'] else 0,
         'rmse': rmse, 'mae': mae,
-        'precision': precision, 'recall': recall, 'hit_rate': hit_rate, 'ndcg': ndcg
+        'precision': precision, 'recall': recall, 'hit_rate': hit_rate, 'ndcg': ndcg,
+        'v2c_precision': v2c_precision, 'v2c_recall': v2c_recall
     }
     
     print("\n[✓] 数据获取完成！")
@@ -256,6 +261,24 @@ def plot_all(data):
     plt.close()
     print(f"[✓] {OUTPUT_DIR}/07_ranking_metrics.png")
 
+    # 8. View→AddToCart 预测指标（任务核心目标）
+    fig, ax = plt.subplots(figsize=(10, 6))
+    metrics = ['V2C Precision@10', 'V2C Recall@10', 'Data V2C Rate']
+    values = [data['stats']['v2c_precision']*100, data['stats']['v2c_recall']*100, 
+              data['stats']['v2c_rate']]
+    colors = ['#e74c3c', '#3498db', '#f39c12']
+    bars = ax.bar(metrics, values, color=colors, width=0.5)
+    ax.set_title('View → AddToCart Prediction Performance\n(Core Task Objective)', fontsize=14, fontweight='bold')
+    ax.set_ylabel('Percentage (%)')
+    ax.set_ylim(0, max(values) * 1.4)
+    for bar, v in zip(bars, values):
+        ax.text(bar.get_x() + bar.get_width()/2, v + max(values)*0.02, f'{v:.2f}%', ha='center', fontweight='bold', fontsize=11)
+    ax.grid(axis='y', alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(f'{OUTPUT_DIR}/08_view_to_cart_metrics.png', dpi=150)
+    plt.close()
+    print(f"[✓] {OUTPUT_DIR}/08_view_to_cart_metrics.png")
+
 
 def generate_report(stats):
     """生成报告"""
@@ -286,11 +309,15 @@ def generate_report(stats):
    RMSE:              {stats['rmse']:.4f}
    MAE:               {stats['mae']:.4f}
    
-   【Ranking Metrics @K=10】 ★ Core Metrics
+   【Ranking Metrics @K=10】
    Precision@10:      {stats['precision']*100:.2f}%  (命中率)
    Recall@10:         {stats['recall']*100:.2f}%  (召回率)
    Hit Rate:          {stats['hit_rate']*100:.2f}%  (用户覆盖)
    NDCG@10:           {stats['ndcg']*100:.2f}%  (排序质量)
+
+   【View→AddToCart Prediction】 ★ Core Task Objective
+   V2C Precision@10:  {stats['v2c_precision']*100:.2f}%  (预测加购命中率)
+   V2C Recall@10:     {stats['v2c_recall']*100:.2f}%  (预测加购召回率)
 
 4. Charts Generated
 --------------------------------------------------------------------------------
@@ -300,7 +327,8 @@ def generate_report(stats):
    04_hourly_activity.png       Hourly Activity
    05_top_items.png             Top 20 Items
    06_regression_metrics.png    RMSE & MAE
-   07_ranking_metrics.png       Precision, Recall, Hit Rate, NDCG ★
+   07_ranking_metrics.png       Precision, Recall, Hit Rate, NDCG
+   08_view_to_cart_metrics.png  View→Cart Prediction ★
 
 ================================================================================
 """

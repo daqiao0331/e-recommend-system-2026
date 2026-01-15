@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}电商推荐系统{% endblock %}</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <!-- ECharts -->
+    <script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
+    
+    <style>
+        :root {
+            --primary-color: #4e73df;
+            --success-color: #1cc88a;
+            --warning-color: #f6c23e;
+            --danger-color: #e74a3b;
+            --info-color: #36b9cc;
+            --secondary-color: #858796;
+            --dark-color: #5a5c69;
+            --light-bg: #f8f9fc;
+        }
+        
+        body {
+            background-color: var(--light-bg);
+            font-family: 'Nunito', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        
+        /* 侧边栏 */
+        .sidebar {
+            min-height: 100vh;
+            background: linear-gradient(180deg, var(--primary-color) 10%, #224abe 100%);
+            width: 250px;
+            position: fixed;
+            left: 0;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .sidebar .nav-link {
+            color: rgba(255, 255, 255, 0.8);
+            padding: 1rem 1.5rem;
+            font-weight: 500;
+        }
+        
+        .sidebar .nav-link:hover {
+            color: #fff;
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+        
+        .sidebar .nav-link.active {
+            color: #fff;
+            font-weight: 700;
+        }
+        
+        .sidebar .nav-link i {
+            margin-right: 0.5rem;
+            width: 20px;
+            text-align: center;
+        }
+        
+        .sidebar-brand {
+            padding: 1.5rem;
+            text-align: center;
+            color: #fff;
+            font-size: 1.2rem;
+            font-weight: 800;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .sidebar-brand i {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+            display: block;
+        }
+        
+        /* 主内容区 */
+        .main-content {
+            margin-left: 250px;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        
+        /* 顶部导航 */
+        .topbar {
+            background-color: #fff;
+            box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.15);
+            padding: 0.75rem 1.5rem;
+            margin-bottom: 1.5rem;
+            border-radius: 0.35rem;
+        }
+        
+        /* 统计卡片 */
+        .stat-card {
+            border: none;
+            border-radius: 0.35rem;
+            box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.1);
+            border-left: 4px solid;
+        }
+        
+        .stat-card.primary { border-left-color: var(--primary-color); }
+        .stat-card.success { border-left-color: var(--success-color); }
+        .stat-card.warning { border-left-color: var(--warning-color); }
+        .stat-card.danger { border-left-color: var(--danger-color); }
+        .stat-card.info { border-left-color: var(--info-color); }
+        
+        .stat-card .stat-icon {
+            font-size: 2rem;
+            color: #dddfeb;
+        }
+        
+        .stat-card .stat-label {
+            color: var(--primary-color);
+            font-weight: 700;
+            text-transform: uppercase;
+            font-size: 0.75rem;
+        }
+        
+        .stat-card .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--dark-color);
+        }
+        
+        /* 内容卡片 */
+        .content-card {
+            background: #fff;
+            border-radius: 0.35rem;
+            box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.1);
+            margin-bottom: 1.5rem;
+        }
+        
+        .content-card .card-header {
+            background: #f8f9fc;
+            border-bottom: 1px solid #e3e6f0;
+            padding: 1rem 1.25rem;
+            font-weight: 700;
+            color: var(--primary-color);
+        }
+        
+        .content-card .card-body {
+            padding: 1.25rem;
+        }
+        
+        /* 表格 */
+        .table-custom thead th {
+            background-color: var(--light-bg);
+            border-bottom: 2px solid #e3e6f0;
+            font-weight: 700;
+            color: var(--dark-color);
+        }
+        
+        /* 按钮 */
+        .btn-primary {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+        
+        .btn-primary:hover {
+            background-color: #2e59d9;
+            border-color: #2653d4;
+        }
+        
+        .btn-success {
+            background-color: var(--success-color);
+            border-color: var(--success-color);
+        }
+        
+        /* 图表容器 */
+        .chart-container {
+            height: 300px;
+            width: 100%;
+        }
+        
+        /* 推荐结果 */
+        .recommend-item {
+            display: flex;
+            align-items: center;
+            padding: 0.75rem;
+            border-bottom: 1px solid #e3e6f0;
+            transition: background-color 0.2s;
+        }
+        
+        .recommend-item:hover {
+            background-color: var(--light-bg);
+        }
+        
+        .recommend-item:last-child {
+            border-bottom: none;
+        }
+        
+        .recommend-rank {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--primary-color);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            margin-right: 1rem;
+        }
+        
+        .recommend-rank.top3 {
+            background: linear-gradient(135deg, #f6c23e, #e74a3b);
+        }
+        
+        /* 用户画像 */
+        .profile-stat {
+            text-align: center;
+            padding: 1rem;
+        }
+        
+        .profile-stat .value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary-color);
+        }
+        
+        .profile-stat .label {
+            color: var(--secondary-color);
+            font-size: 0.85rem;
+        }
+        
+        /* 加载动画 */
+        .loading-spinner {
+            display: none;
+            text-align: center;
+            padding: 2rem;
+        }
+        
+        .loading-spinner.show {
+            display: block;
+        }
+        
+        /* 状态标签 */
+        .status-badge {
+            padding: 0.35rem 0.75rem;
+            border-radius: 10rem;
+            font-size: 0.75rem;
+            font-weight: 700;
+        }
+        
+        .status-badge.success { background: #d4edda; color: #155724; }
+        .status-badge.warning { background: #fff3cd; color: #856404; }
+        .status-badge.danger { background: #f8d7da; color: #721c24; }
+        .status-badge.info { background: #d1ecf1; color: #0c5460; }
+        
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 100%;
+                height: auto;
+                position: relative;
+            }
+            .main-content {
+                margin-left: 0;
+            }
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <!-- 侧边栏 -->
+    <div class="sidebar">
+        <div class="sidebar-brand">
+            <i class="fas fa-shopping-cart"></i>
+            电商推荐系统
+        </div>
+        <nav class="nav flex-column mt-3">
+            <a class="nav-link {% if request.endpoint == 'main.index' %}active{% endif %}" href="{{ url_for('main.index') }}">
+                <i class="fas fa-tachometer-alt"></i> 系统概览
+            </a>
+            <a class="nav-link {% if 'recommend' in request.endpoint %}active{% endif %}" href="{{ url_for('recommend.index') }}">
+                <i class="fas fa-magic"></i> 推荐查询
+            </a>
+            <a class="nav-link {% if 'analysis' in request.endpoint %}active{% endif %}" href="{{ url_for('analysis.index') }}">
+                <i class="fas fa-chart-bar"></i> 数据分析
+            </a>
+            <a class="nav-link {% if 'model' in request.endpoint %}active{% endif %}" href="{{ url_for('model.index') }}">
+                <i class="fas fa-brain"></i> 模型管理
+            </a>
+            <hr class="mx-3" style="border-color: rgba(255,255,255,0.2);">
+            <a class="nav-link" href="{{ url_for('recommend.random_recommend') }}">
+                <i class="fas fa-random"></i> 随机推荐
+            </a>
+        </nav>
+    </div>
+
+    <!-- 主内容区 -->
+    <div class="main-content">
+        <!-- 顶部栏 -->
+        <div class="topbar d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">{% block page_title %}仪表盘{% endblock %}</h5>
+            <div>
+                <span class="text-muted me-3">
+                    <i class="fas fa-clock"></i> 
+                    <span id="current-time"></span>
+                </span>
+            </div>
+        </div>
+        
+        <!-- 页面内容 -->
+        {% block content %}{% endblock %}
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        // 更新时间
+        function updateTime() {
+            const now = new Date();
+            document.getElementById('current-time').textContent = now.toLocaleString('zh-CN');
+        }
+        updateTime();
+        setInterval(updateTime, 1000);
+        
+        // 数字格式化
+        function formatNumber(num) {
+            if (num >= 1000000) {
+                return (num / 1000000).toFixed(1) + 'M';
+            } else if (num >= 1000) {
+                return (num / 1000).toFixed(1) + 'K';
+            }
+            return num.toString();
+        }
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

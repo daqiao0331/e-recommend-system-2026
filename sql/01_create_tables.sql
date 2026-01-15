@@ -82,14 +82,59 @@ CREATE TABLE IF NOT EXISTS user_item_ratings (
     item_id             STRING      COMMENT '商品ID',
     rating              DOUBLE      COMMENT '隐式评分',
     interaction_count   INT         COMMENT '交互次数',
-    max_event           STRING      COMMENT '最高级别事件'
+    max_event           STRING      COMMENT '最高级别事件',
+    has_addtocart       INT         COMMENT '是否有加购行为(0/1)',
+    first_interaction   DATE        COMMENT '首次交互日期',
+    last_interaction    DATE        COMMENT '最后交互日期',
+    rating_normalized   DOUBLE      COMMENT '对数标准化评分'
 )
-COMMENT '用户商品评分矩阵 - 用于推荐模型训练'
+COMMENT '用户商品评分矩阵 - 用于推荐模型训练(基于view预测addtocart)'
 STORED AS PARQUET
 LOCATION '${HDFS_BASE}/processed/user_item_ratings';
 
 -- ============================================
--- 5. 推荐结果表 (由Spark生成)
+-- 5. 用户特征表 (由Spark生成)
+-- ============================================
+DROP TABLE IF EXISTS user_features;
+
+CREATE TABLE IF NOT EXISTS user_features (
+    visitor_id      STRING      COMMENT '访客ID',
+    total_events    BIGINT      COMMENT '总事件数',
+    view_count      BIGINT      COMMENT '浏览次数',
+    cart_count      BIGINT      COMMENT '加购次数',
+    buy_count       BIGINT      COMMENT '购买次数',
+    unique_items    BIGINT      COMMENT '交互商品数',
+    active_days     BIGINT      COMMENT '活跃天数',
+    first_visit     DATE        COMMENT '首次访问日期',
+    last_visit      DATE        COMMENT '最后访问日期',
+    cart_rate       DOUBLE      COMMENT '加购转化率(cart/view)',
+    buy_rate        DOUBLE      COMMENT '购买转化率(buy/view)'
+)
+COMMENT '用户行为特征表 - 用于冷启动和用户分析'
+STORED AS PARQUET
+LOCATION '${HDFS_BASE}/processed/user_features';
+
+-- ============================================
+-- 6. 商品特征表 (由Spark生成)
+-- ============================================
+DROP TABLE IF EXISTS item_features;
+
+CREATE TABLE IF NOT EXISTS item_features (
+    item_id         STRING      COMMENT '商品ID',
+    total_events    BIGINT      COMMENT '总事件数',
+    view_count      BIGINT      COMMENT '浏览次数',
+    cart_count      BIGINT      COMMENT '加购次数',
+    buy_count       BIGINT      COMMENT '购买次数',
+    unique_visitors BIGINT      COMMENT '独立访客数',
+    cart_rate       DOUBLE      COMMENT '加购转化率(cart/view)',
+    conversion_rate DOUBLE      COMMENT '购买转化率(buy/view)'
+)
+COMMENT '商品特征表 - 用于冷启动和商品分析'
+STORED AS PARQUET
+LOCATION '${HDFS_BASE}/processed/item_features';
+
+-- ============================================
+-- 7. 推荐结果表 (由Spark生成)
 -- ============================================
 DROP TABLE IF EXISTS user_recommendations;
 
@@ -103,7 +148,76 @@ STORED AS PARQUET
 LOCATION '${HDFS_BASE}/output/recommendations';
 
 -- ============================================
--- 6. 统计结果表
+-- 8. 完整推荐结果表 (由Spark生成)
+-- ============================================
+DROP TABLE IF EXISTS user_recommendations_full;
+
+CREATE TABLE IF NOT EXISTS user_recommendations_full (
+    visitor_id       STRING      COMMENT '原始访客ID',
+    recommended_item STRING      COMMENT '推荐商品ID',
+    score            DOUBLE      COMMENT '推荐分数',
+    user_id          INT         COMMENT '用户索引ID',
+    item_id          INT         COMMENT '商品索引ID'
+)
+COMMENT '完整推荐结果表(含原始ID)'
+STORED AS PARQUET
+LOCATION '${HDFS_BASE}/output/recommendations_full';
+
+-- ============================================
+-- 9. ID映射表 (由Spark生成)
+-- ============================================
+DROP TABLE IF EXISTS user_id_mapping;
+
+CREATE TABLE IF NOT EXISTS user_id_mapping (
+    user_id          INT         COMMENT '用户索引ID',
+    original_user_id STRING      COMMENT '原始访客ID'
+)
+COMMENT '用户ID映射表'
+STORED AS PARQUET;
+
+DROP TABLE IF EXISTS item_id_mapping;
+
+CREATE TABLE IF NOT EXISTS item_id_mapping (
+    item_id          INT         COMMENT '商品索引ID',
+    original_item_id STRING      COMMENT '原始商品ID'
+)
+COMMENT '商品ID映射表'
+STORED AS PARQUET;
+
+-- ============================================
+-- 10. 模型评估指标表 (由Spark生成)
+-- ============================================
+DROP TABLE IF EXISTS model_metrics;
+
+CREATE TABLE IF NOT EXISTS model_metrics (
+    rmse               DOUBLE      COMMENT '均方根误差',
+    mae                DOUBLE      COMMENT '平均绝对误差',
+    precision_at_10    DOUBLE      COMMENT 'Precision@10',
+    recall_at_10       DOUBLE      COMMENT 'Recall@10',
+    hit_rate           DOUBLE      COMMENT '命中率',
+    ndcg_at_10         DOUBLE      COMMENT 'NDCG@10',
+    v2c_precision_at_10 DOUBLE     COMMENT 'View→Cart Precision@10',
+    v2c_recall_at_10   DOUBLE      COMMENT 'View→Cart Recall@10'
+)
+COMMENT 'ALS模型评估指标(含view→cart预测)'
+STORED AS PARQUET;
+
+-- ============================================
+-- 11. View→AddToCart 预测数据集 (由Spark生成)
+-- ============================================
+DROP TABLE IF EXISTS view_to_cart_dataset;
+
+CREATE TABLE IF NOT EXISTS view_to_cart_dataset (
+    visitor_id      STRING      COMMENT '访客ID',
+    item_id         STRING      COMMENT '商品ID',
+    label           INT         COMMENT '是否加购(0/1)'
+)
+COMMENT 'View→AddToCart预测数据集 - 核心任务数据'
+STORED AS PARQUET
+LOCATION '${HDFS_BASE}/processed/view_to_cart';
+
+-- ============================================
+-- 12. 统计结果表
 -- ============================================
 DROP TABLE IF EXISTS daily_statistics;
 
