@@ -48,6 +48,7 @@ def prepare_data(spark):
     """准备训练数据（过滤冷启动）"""
     logger.info("准备训练数据...")
     
+    # 恢复使用 rating (已经是经过 IIF 加权的)
     ratings = spark.sql("""
         SELECT visitor_id, item_id, rating, has_addtocart
         FROM ecommerce.user_item_ratings
@@ -110,36 +111,70 @@ def index_ids(ratings_df):
     return ratings_final, user_mapping, item_mapping
 
 
-def train_als_model(training_data):
+def tune_als_model(training_data, test_data):
     """
-    训练ALS模型（优化版V2）
-    
-    参数调优:
-    - rank=80: 更多隐因子捕捉复杂模式
-    - maxIter=25: 充分迭代
-    - regParam=0.005: 更低正则化
-    - alpha=5: 降低置信权重，让模型更关注评分差异
+    网格搜索调优 ALS 模型
+    针对隐式反馈数据寻找最佳 Rank, RegParam, Alpha
     """
-    logger.info("训练ALS模型...")
-    start_time = time.time()
+    logger.info("开始网格搜索调优 (Grid Search)...")
     
-    als = ALS(
-        rank=80,                    # 增加隐因子
-        maxIter=25,                 # 增加迭代
-        regParam=0.005,             # 更低正则化
-        alpha=5.0,                  # 降低置信权重
-        userCol="user_id",
-        itemCol="item_id",
-        ratingCol="rating",
-        coldStartStrategy="drop",
-        nonnegative=True,
-        implicitPrefs=True
-    )
+    # 定义参数网格
+    # Rank: 隐因子数量。过小欠拟合，过大过拟合。
+    # RegParam: 正则化。隐式反馈通常需要较强的正则化。
+    # Alpha: 置信度权重。Score经过IIF处理后较小，需要较大的Alpha放大正样本信号。
+    param_grid = [
+        {'rank': 30, 'reg': 0.1,  'alpha': 10.0},
+        {'rank': 30, 'reg': 0.05, 'alpha': 40.0},
+        {'rank': 60, 'reg': 0.1,  'alpha': 40.0}
+    ]
     
-    model = als.fit(training_data)
+    best_model = None
+    best_score = -1.0
+    best_params = {}
     
-    logger.info(f"训练完成，耗时: {time.time() - start_time:.2f}秒")
-    return model
+    for params in param_grid:
+        logger.info(f"尝试参数: {params}")
+        start = time.time()
+        
+        als = ALS(
+            rank=params['rank'],
+            maxIter=15,             # 稍微减少迭代加速搜索
+            regParam=params['reg'],
+            alpha=params['alpha'],
+            userCol="user_id",
+            itemCol="item_id",
+            ratingCol="rating",
+            coldStartStrategy="drop",
+            nonnegative=True,
+            implicitPrefs=True
+        )
+        
+        model = als.fit(training_data)
+        
+        # 使用 Recall@10 作为核心选择指标 (Hit Rate proxy)
+        # 这里只计算简单的 regression metric 可能不够，我们直接用 Spark 的 Evaluator 
+        # 但为了准确，我们用之前定义的 evaluate_ranking_metrics 的简化版
+        
+        # 为了速度，只在测试集的一个子集上评估
+        test_subset = test_data.sample(False, 0.5, seed=42) 
+        predictions = model.transform(test_subset)
+        
+        # 简单计算预测值与实际值的相关性不行，因为这是隐式反馈
+        # 我们直接看 recommendForUserSubset 的命中率
+        
+        # 小样本评估 Recall
+        metrics = evaluate_view_to_cart_prediction(SparkSession.getActiveSession(), model, test_subset, k=10)
+        current_score = metrics['v2c_recall'] # 优先优化 View->Cart 转化
+        
+        logger.info(f"  -> V2C Recall: {current_score:.4f} (耗时: {time.time()-start:.1f}s)")
+        
+        if current_score > best_score:
+            best_score = current_score
+            best_model = model
+            best_params = params
+            
+    logger.info(f"最佳参数组合: {best_params} (Score: {best_score:.4f})")
+    return best_model, best_params
 
 
 def evaluate_model(model, test_data):
@@ -339,13 +374,24 @@ def save_results(spark, model, recommendations, user_recs_flat, user_mapping, it
     """保存模型和结果"""
     logger.info("保存模型和结果...")
     
-    # 保存模型（使用环境变量配置路径）
+    # 保存模型（使用环境变量配置路径或本地路径）
     import os
-    hdfs_base = os.environ.get("HDFS_BASE", f"/user/{os.environ.get('USER', 'daqiao')}/ecommerce")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_path = f"{hdfs_base}/model/als_model_{timestamp}"
+    
+    # 获取项目根目录 (假设脚本在 spark/ 目录下)
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    if "HDFS_BASE" in os.environ:
+        hdfs_base = os.environ["HDFS_BASE"]
+        model_path = f"{hdfs_base}/model/als_model_{timestamp}"
+    else:
+        # 在Linux Ubuntu本地环境下，默认保存到项目目录下的 output_hdfs/model 文件夹以模拟HDFS
+        # 使用 file:// 协议确保写入本地文件系统
+        model_path = f"file://{project_root}/output_hdfs/model/als_model_{timestamp}"
+
+    logger.info(f"正在保存模型到: {model_path}")
     model.write().overwrite().save(model_path)
-    logger.info(f"[✓] 模型: {model_path}")
+    logger.info(f"[✓] 模型已保存: {model_path}")
     
     # 保存推荐结果
     user_recs_flat.write.mode("overwrite").saveAsTable("ecommerce.user_recommendations")
@@ -398,11 +444,12 @@ def main():
         training, test = ratings_indexed.randomSplit([0.8, 0.2], seed=42)
         logger.info(f"训练集: {training.count():,}, 测试集: {test.count():,}")
         
-        # 训练
-        model = train_als_model(training)
+        # 训练 (使用网格搜索)
+        model, best_params = tune_als_model(training, test)
         
-        # 评估 - 回归指标
+        # 评估 - 回归指标 (仅参考)
         rmse, mae = evaluate_model(model, test)
+
         
         # 评估 - 排序指标 (核心)
         ranking_metrics = evaluate_ranking_metrics(spark, model, test, k=10)

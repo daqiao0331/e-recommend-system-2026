@@ -38,7 +38,14 @@ def load_data(spark):
     """从Hive或HDFS加载数据"""
     logger.info("正在加载数据...")
     
-    hdfs_base = os.environ.get("HDFS_BASE", f"/user/{os.environ.get('USER', 'daqiao')}/ecommerce")
+    # 获取项目根目录 (假设脚本在 spark/ 目录下)
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    if "HDFS_BASE" in os.environ:
+        hdfs_base = os.environ["HDFS_BASE"]
+    else:
+        # 本地路径默认值
+        hdfs_base = f"file://{project_root}/output_hdfs"
     
     try:
         events_df = spark.sql("SELECT * FROM ecommerce.user_events")
@@ -160,44 +167,51 @@ def clean_data(events_df, original_count):
 
 def create_user_item_ratings(cleaned_df):
     """
-    构建用户-商品隐式评分矩阵
+    构建用户-商品隐式评分矩阵 (优化版: 引入 TF-IDF 思想)
     
-    针对任务目标优化: 预测view→addtocart转化
-    评分策略（强调加购和购买行为）:
-    - view: 1分
-    - addtocart: 3分（核心预测目标，权重提高）
-    - transaction: 5分（最高价值行为）
+    改进策略:
+    1. Event Weight: 保持 view=1, cart=3, buy=10
+    2. Item Weighting (IIF): 降低热门商品的权重。
+       如果一个商品被所有人都看过，那么看过它并不能代表用户的特殊偏好。
+       公式: Score = EventScore * (1 / log(ItemPopularity + 2))
     """
-    logger.info("正在构建用户-商品评分矩阵...")
+    logger.info("正在构建用户-商品评分矩阵 (IIF加权)...")
     
-    # 为不同行为赋予优化后的权重
-    scored_df = cleaned_df.withColumn("score",
+    # 1. 计算每个商品的全局热度 (Total Views)
+    item_popularity = cleaned_df.groupBy("item_id").agg(count("*").alias("item_global_count"))
+    
+    # 2. 基础行为评分
+    scored_df = cleaned_df.withColumn("base_score",
         when(col("event_type") == "view", 1.0)
-        .when(col("event_type") == "addtocart", 5.0)  # 加购权重提高
-        .when(col("event_type") == "transaction", 10.0)  # 购买最高权重
+        .when(col("event_type") == "addtocart", 3.0)  # 原5.0 -> 3.0, 适当降低避免独占
+        .when(col("event_type") == "transaction", 10.0) 
         .otherwise(0.0)
     )
     
-    # 聚合用户对商品的评分
-    user_item_ratings = scored_df \
+    # 3. 关联热度并计算最终加权分
+    # 聚合每个用户对每个商品的总基础分
+    user_item_base = scored_df \
         .groupBy("visitor_id", "item_id") \
         .agg(
-            sum("score").alias("rating"),
+            sum("base_score").alias("total_base_score"),
             count("*").alias("interaction_count"),
             max("event_type").alias("max_event"),
-            # 标记是否有加购行为（用于评估）
             max(when(col("event_type") == "addtocart", 1).otherwise(0)).alias("has_addtocart"),
-            # 标记是否有购买行为
-            max(when(col("event_type") == "transaction", 1).otherwise(0)).alias("has_transaction"),
-            min("event_date").alias("first_interaction"),
-            max("event_date").alias("last_interaction")
+            max(when(col("event_type") == "transaction", 1).otherwise(0)).alias("has_transaction")
         )
     
-    # 对数标准化（压缩评分范围，避免极端值）
-    user_item_ratings = user_item_ratings \
-        .withColumn("rating_normalized", log1p(col("rating")))
+    # 加入商品热度权重
+    # IIF系数: 1 / log10(count + 2). count=10 -> 0.92, count=100 -> 0.5, count=1000 -> 0.33
+    ratings_final = user_item_base.join(item_popularity, "item_id") \
+        .withColumn("iif_weight", 1.0 / log1p(col("item_global_count") + 1)) \
+        .withColumn("rating", col("total_base_score") * col("iif_weight")) \
+        .drop("item_global_count", "iif_weight")
+
+    # 注意：这里不再做 log1p(rating)，因为 IIF 已经起到了缩放作用，
+    # 且我们希望通过 alpha 参数在模型训练阶段控制置信度
     
-    logger.info(f"用户-商品对数量: {user_item_ratings.count():,}")
+    logger.info(f"用户-商品对数量: {ratings_final.count():,}")
+    return ratings_final
     return user_item_ratings
 
 

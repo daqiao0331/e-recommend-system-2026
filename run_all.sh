@@ -26,9 +26,12 @@ export PATH="$PATH:$HIVE_HOME/bin"
 export PYSPARK_PYTHON=/usr/bin/python3
 export PYSPARK_DRIVER_PYTHON=/usr/bin/python3
 
-# 配置 HDFS 基础路径 (使用当前用户，避免权限问题)
-export HDFS_BASE="/user/$(whoami)/ecommerce"
-echo "使用 HDFS 路径: $HDFS_BASE"
+# 配置 HDFS 基础路径 (适配 Linux Ubuntu 本地环境)
+# 使用 file:// 协议指向本地项目目录，避免无 HDFS 环境下的 /user 权限问题
+export HDFS_BASE="file://${PROJECT_DIR}/output_hdfs"
+# 确保目录存在
+mkdir -p "${PROJECT_DIR}/output_hdfs/model"
+echo "使用 HDFS 路径 (Local): $HDFS_BASE"
 
 # 步骤1: 环境检查
 echo ""
@@ -61,40 +64,27 @@ echo "[提示] 如需运行 Hive 分析，请手动执行: hive -f sql/02_data_a
 echo ""
 echo "[Step 5/7] 运行Spark数据预处理..."
 spark-submit \
-    --master yarn \
-    --deploy-mode client \
+    --master local[*] \
     --driver-memory 4g \
-    --executor-memory 4g \
-    --num-executors 2 \
-    --executor-cores 2 \
     --conf "spark.driver.extraJavaOptions=-Xss4m" \
-    --conf "spark.executor.extraJavaOptions=-Xss4m" \
     spark/02_data_preprocessing.py
 
 # 步骤6: 训练ALS模型
 echo ""
 echo "[Step 6/7] 训练ALS推荐模型..."
 spark-submit \
-    --master yarn \
-    --deploy-mode client \
+    --master local[*] \
     --driver-memory 4g \
-    --executor-memory 4g \
-    --num-executors 2 \
-    --executor-cores 2 \
     --conf "spark.driver.extraJavaOptions=-Xss4m" \
-    --conf "spark.executor.extraJavaOptions=-Xss4m" \
     spark/03_train_als_model.py
 
 # 步骤7: 可视化
 echo ""
 echo "[Step 7/7] 生成可视化图表..."
 spark-submit \
-    --master yarn \
-    --deploy-mode client \
+    --master local[*] \
     --driver-memory 2g \
-    --executor-memory 2g \
     --conf "spark.driver.extraJavaOptions=-Xss4m" \
-    --conf "spark.executor.extraJavaOptions=-Xss4m" \
     spark/04_visualization.py
 
 echo ""
