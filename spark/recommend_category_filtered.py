@@ -131,11 +131,23 @@ def main():
     
     user_id = user_map[0]['user_id']
     
+    # 自动查找最新模型
+    model_path = "/user/ecommerce/model/als_model"
+    import os
+    local_model_dir = "output_hdfs/model"
+    if os.path.exists(local_model_dir):
+        dirs = [d for d in os.listdir(local_model_dir) if d.startswith("als_model_")]
+        if dirs:
+            latest_model = sorted(dirs)[-1]
+            abs_path = os.path.abspath(os.path.join(local_model_dir, latest_model))
+            model_path = f"file://{abs_path}"
+            print(f"  [提示] 自动加载最新训练的模型: {latest_model}")
+
     # 加载模型
     try:
-        model = ALSModel.load("/user/ecommerce/model/als_model")
+        model = ALSModel.load(model_path)
     except:
-        print("  模型未找到，请先训练: spark-submit spark/03_train_als_model.py")
+        print(f"  模型未找到 ({model_path})，请先训练: spark-submit spark/03_train_als_model.py")
         spark.stop()
         return
     

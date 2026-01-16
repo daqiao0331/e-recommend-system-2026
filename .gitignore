@@ -47,7 +47,6 @@ Thumbs.db
 # Data
 data/
 output/
-output_hdfs/
 
 # Spark/Hadoop Checksums
 *.csv.crc

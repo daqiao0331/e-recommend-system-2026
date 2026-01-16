@@ -106,11 +106,25 @@ def main():
     
     user_id = user_map[0]['user_id']
     
+    # 自动查找最新模型
+    model_path = "/user/ecommerce/model/als_model"
+    import os
+    # 检查本地是否有output_hdfs目录（适配本地运行环境）
+    local_model_dir = "output_hdfs/model"
+    if os.path.exists(local_model_dir):
+        dirs = [d for d in os.listdir(local_model_dir) if d.startswith("als_model_")]
+        if dirs:
+            latest_model = sorted(dirs)[-1]
+            # 使用绝对路径确保Spark能找到
+            abs_path = os.path.abspath(os.path.join(local_model_dir, latest_model))
+            model_path = f"file://{abs_path}"
+            print(f"  [提示] 自动加载最新训练的模型: {latest_model}")
+
     # 加载模型
     try:
-        model = ALSModel.load("/user/ecommerce/model/als_model")
+        model = ALSModel.load(model_path)
     except:
-        print("  模型未找到，请先训练: spark-submit spark/03_train_als_model.py")
+        print(f"  模型未找到 ({model_path})，请先训练: spark-submit spark/03_train_als_model.py")
         spark.stop()
         return
     
@@ -169,7 +183,9 @@ def main():
     else:
         print("  ✗ 多样性差，推荐过于集中")
     
-    # 3. 与历史的相关性
+    # 3. 结果解释与分析
+    print("\n【推荐逻辑深度解析】")
+    
     hist_categories = spark.sql(f"""
         SELECT DISTINCT p.property_value as cat
         FROM ecommerce.user_events e
@@ -180,16 +196,32 @@ def main():
     
     hist_cats = set(f"类目{r['cat']}" for r in hist_categories if r['cat'])
     rec_cats_set = set(rec_categories) - {'未分类'}
-    overlap = len(hist_cats & rec_cats_set)
     
-    if hist_cats:
-        print(f"  历史类目: {len(hist_cats)} 个  |  推荐命中: {overlap} 个", end="")
-        if overlap >= 3:
-            print("  ✓ 相关性强")
-        elif overlap >= 1:
-            print("  ⚠ 相关性中等")
-        else:
-            print("  ✗ 相关性弱，可能在探索新兴趣")
+    # 计算交集和差集
+    intersection = hist_cats & rec_cats_set
+    difference = rec_cats_set - hist_cats
+    
+    print(f"  用户历史偏好类目: {list(hist_cats)[:5]}{'...' if len(hist_cats)>5 else ''}")
+    print(f"  推荐结果覆盖类目: {len(rec_cats_set)} 个")
+    
+    if intersection:
+        print(f"  ✓ {len(intersection)} 个类目直接命中历史兴趣 (如 {list(intersection)[0]})")
+    
+    if difference:
+        print(f"\n  ? 为什么会出现 {len(difference)} 个非历史类目 (如 {list(difference)[0]})？")
+        print("  -------------------------------------------------------------")
+        print("  这里是 ALS 协同过滤算法的核心特性体现：")
+        print("  1. 【隐式关联挖掘】: 算法通过大数据发现：")
+        print("     “看过[您的历史类目]的许多其他用户，往往也购买了[这些新推荐类目]”。")
+        print("     -> 系统预测：这可能是您的潜在需求（例如买了手机的人通常会看手机壳/耳机）。")
+        print("  2. 【全局热门补充】: 如果您的历史行为较少（少于5-10次），算法个性化信号不足，")
+        print("     为了保证推荐列表不为空，会自动填充全网评分最高的“万金油”商品。")
+        
+    if not intersection and difference:
+         print("\n  [总结] 当前推荐完全基于“人群相似度”而非“内容相似度”。")
+         print("  系统判断您可能属于一个购买习惯更广泛的用户群组。")
+         print("  若您认为这不准确，希望强制限定在历史兴趣圈内，请使用【类目过滤推荐模式】：")
+         print(f"  >>> spark-submit spark/recommend_category_filtered.py {visitor_id}")
     
     print("\n" + "="*70 + "\n")
     
